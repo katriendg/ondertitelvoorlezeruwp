@@ -1,0 +1,119 @@
+﻿<Page
+    x:Class="OndertitelLezerUwp.Views.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:helper="using:OndertitelLezerUwp.Helpers"
+    Style="{StaticResource PageStyle}"
+    mc:Ignorable="d">
+    <Page.Resources>
+        <helper:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <helper:OneThirdConverter x:Key="OneThirdConverter" />
+        <helper:TwoThirdsConverter x:Key="TwoThirdsConverter" />
+        <helper:BooleanToOpacityConverter x:Key="BooleanToOpacityConverter" />
+        <helper:BooleanToWhiteGreenConverter x:Key="BooleanToWhiteGreenConverter" />
+    </Page.Resources>
+    <Grid
+        x:Name="ContentArea"
+        Margin="{StaticResource MediumLeftRightMargin}">
+        <Grid.RowDefinitions>
+            
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid
+            Grid.Row="0" 
+            Background="{ThemeResource SystemControlPageBackgroundChromeLowBrush}">
+            <!--The SystemControlPageBackgroundChromeLowBrush background represents where you should place your content. 
+                Place your content here.-->
+            <ScrollViewer>
+                <Grid x:Name="ContentGrid">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="850*"/>
+                        <RowDefinition Height="50*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="155*"/>
+                        <ColumnDefinition Width="300"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel x:Name="LeftPanel">
+                        <Grid  x:Name="CameraPreviewGrid" SizeChanged="CameraPreviewGrid_SizeChanged" HorizontalAlignment="Left" VerticalAlignment="Top" Grid.Row="0">
+
+                            <ContentControl x:Name="CaptureContentControl"
+                                        Content="{x:Bind ViewModel.CaptureElement, Mode=OneWay}" Visibility="{x:Bind ViewModel.CaptureElementIsVisible, Converter={StaticResource BooleanToVisibilityConverter} , Mode=OneWay}"
+                                Tapped="ContentControl_Tapped" />
+
+                            <Grid x:Name="GridImagePreview" Visibility="{x:Bind ViewModel.PreviewImageIsVisible, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                <Image x:Name="PreviewOcrImage" Source="{x:Bind ViewModel.PreviewImageSource, Mode=OneWay}" Stretch="UniformToFill" HorizontalAlignment="Left" VerticalAlignment="Top" />
+
+                            </Grid>
+
+                            <Canvas>
+                                <!-- Visibility="{x:Bind ViewModel.IsOneThirdCapture, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" -->
+                                <Rectangle 
+                                           Fill="{x:Bind ViewModel.IsOneThirdCapture, Converter={StaticResource BooleanToWhiteGreenConverter}, Mode=OneWay}" Opacity="0.5" Canvas.Left="0" Canvas.Top="{x:Bind ViewModel.CaptureElementActualHeight, Converter={StaticResource OneThirdConverter}, Mode=OneWay}"
+                                           Width="{x:Bind ViewModel.CaptureElementActualWidth, Mode=OneWay}"
+                                           Height="{x:Bind ViewModel.CaptureElementActualHeight, Converter={StaticResource TwoThirdsConverter}, Mode=OneWay}" />
+                            </Canvas>
+
+                        </Grid>
+                        <TextBlock x:Name="OcrResultBlock" Text="{x:Bind ViewModel.OcrResultText, Mode=OneWay}" Margin="12, 10, 12, 10" Visibility="Visible"/>
+                        <ContentControl x:Name="MediaElementTts" Content="{x:Bind ViewModel.MediaElementTts, Mode=OneWay}" />
+
+                    </StackPanel>
+
+
+                    <StackPanel x:Name="RightPanel" Grid.Row="0" Grid.Column="1">
+
+                        <StackPanel Orientation="Horizontal">
+                            <SymbolIcon Symbol="Crop" ToolTipService.ToolTip="3de van het scherm" Width="80" Height="60" Opacity="{x:Bind ToggleThirdScreen.IsOn, Mode=OneWay, Converter={StaticResource BooleanToOpacityConverter}}" />
+                            <ToggleSwitch x:Name="ToggleThirdScreen" IsOn="{x:Bind ViewModel.IsOneThirdCapture, Mode=TwoWay}" TabIndex="1" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <SymbolIcon Symbol="Camera" Width="80" Height="60" Opacity="{x:Bind ToggleImageEffect.IsOn, Mode=OneWay, Converter={StaticResource BooleanToOpacityConverter}}" />
+                            <ToggleSwitch x:Name="ToggleImageEffect" IsOn="{x:Bind ViewModel.IsImageEffectsOn, Mode=TwoWay}" TabIndex="2" />
+                        </StackPanel>
+
+
+                        <StackPanel Orientation="Vertical">
+                            <StackPanel Orientation="Horizontal">
+                                <SymbolIcon Symbol="Pictures" Width="80" Height="60" ToolTipService.ToolTip="Threshold" />
+                                <Slider x:Name="SliderThreshold" Maximum="1.0" Minimum="0.0" StepFrequency="0.1"
+                                Value="{x:Bind ViewModel.StampThreshold, Mode=TwoWay}" Width="100" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Button Margin="20,20,5,5" x:Name="StartStopOcrButton"
+                                IsEnabled="{x:Bind ViewModel.StartStopOcrEnabled, Mode=OneWay}" 
+                                Command="{x:Bind ViewModel.StartStopOcrCommand }"
+                                TabIndex="3"
+                                ToolTipService.ToolTip="Ctrl+W"
+                                >
+                            <Viewbox MaxHeight="60" MaxWidth="120">
+                                <SymbolIcon Symbol="{x:Bind ViewModel.SymbolStartStop, Mode=OneWay}" Foreground="{x:Bind ViewModel.SymbolStartStopColor, Mode=OneWay}" />
+                            </Viewbox>
+                        </Button>
+
+
+                    </StackPanel>
+
+
+
+                    <StackPanel Orientation="Vertical" Grid.Row="1" Grid.ColumnSpan="2" VerticalAlignment="Bottom">
+                        <Border x:Name="StatusBorder" Background="{x:Bind ViewModel.StatusBackground, Mode=OneWay}" Margin="0,0,0,0">
+                            <ScrollViewer VerticalScrollMode="Auto" VerticalScrollBarVisibility="Auto" MaxHeight="200">
+                                <TextBlock x:Name="StatusTextBlock" Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"  FontWeight="Bold" AutomationProperties.LiveSetting="Assertive"
+                                   MaxWidth="{Binding ElementName=Splitter, Path=ActualWidth}" Margin="10,10,10,20" TextWrapping="Wrap"  />
+                            </ScrollViewer>
+                        </Border>
+                    </StackPanel>
+
+                </Grid>
+            </ScrollViewer>
+
+        </Grid>
+    </Grid>
+</Page>
