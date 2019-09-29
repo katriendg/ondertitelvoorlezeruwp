@@ -98,8 +98,8 @@ namespace OndertitelLezerUwp.ViewModels
         public async Task CleanUp()
         {
             await CleanupCameraAsync();
-            _ocrDetectionService.Reset();
-            _ttsSynthesizer.Reset();
+            _ocrDetectionService?.Reset();
+            _ttsSynthesizer?.Reset();
             _trackSpokenSentences = null;
 
             displayInformation.OrientationChanged -= DisplayInformation_OrientationChanged;
