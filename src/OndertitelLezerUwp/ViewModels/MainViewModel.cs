@@ -393,7 +393,10 @@ namespace OndertitelLezerUwp.ViewModels
                 _ttsSynthesizer.Reset();
                 _trackSpokenSentences = new List<string>();
 
-                await _mediaCapture.VideoDeviceController.ExposureControl.SetAutoAsync(false);
+                if(_mediaCapture.VideoDeviceController.ExposureControl.Supported)
+                {
+                    await _mediaCapture.VideoDeviceController.ExposureControl.SetAutoAsync(false);
+                }
 
                 SymbolStartStop = Symbol.Pause;
                 SymbolStartStopColor = new SolidColorBrush(Windows.UI.Colors.Red);
