@@ -24,6 +24,7 @@ using System.Globalization;
 using Windows.Media.SpeechSynthesis;
 using Windows.Media.MediaProperties;
 using Windows.Media;
+using Windows.Media.Capture.Frames;
 
 namespace OndertitelLezerUwp.ViewModels
 {
@@ -150,8 +151,10 @@ namespace OndertitelLezerUwp.ViewModels
             var videoFrame = new VideoFrame(BitmapPixelFormat.Bgra8, videoFrameWidth, videoFrameHeight);
 
             // Capture the preview frame.
-            using (var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame))
+            //using (var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame))
+            using (var currentFrameReference = _mediaFrameReader.TryAcquireLatestFrame())
             {
+                var currentFrame = currentFrameReference.VideoMediaFrame;
                 // Collect the resulting frame.
                 SoftwareBitmap bitmap = currentFrame.SoftwareBitmap;
                 WriteableBitmap processedBitmap;
@@ -368,7 +371,7 @@ namespace OndertitelLezerUwp.ViewModels
                 PreviewImageIsVisible = false;
                 CaptureElementIsVisible = true;
 
-
+                _mediaFrameReader.FrameArrived -= MediaFrameReaderOnFrameArrived;
                 _dispatcherTimer.Stop();
                 _dispatcherTimer.Tick -= _dispatcherTimer_Tick;
                 SymbolStartStop = Symbol.Play;
@@ -402,18 +405,35 @@ namespace OndertitelLezerUwp.ViewModels
                 SymbolStartStopColor = new SolidColorBrush(Windows.UI.Colors.Red);
                 _isOcrStarted = true;
 
-                _dispatcherTimer.Tick += _dispatcherTimer_Tick;
-                _dispatcherTimer.Interval = new TimeSpan(0, 0, 0, 0, 600);
-                _dispatcherTimer.Start();
+                //_dispatcherTimer.Tick += _dispatcherTimer_Tick;
+                //_dispatcherTimer.Interval = new TimeSpan(0, 0, 0, 0, 600);
+                //_dispatcherTimer.Start();
 
+                _mediaFrameReader.FrameArrived += MediaFrameReaderOnFrameArrived;
+                await _mediaFrameReader.StartAsync();
 
             }
 
         }
+
+        private async void MediaFrameReaderOnFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
+        {
+            try
+            {
+                await ProcessFrameOcr(_threshold);
+            }
+            catch (System.Exception oexc)
+            {
+                Log.Error(oexc, "Error from await _ocrDetectionService.PerformOcr(bitmapToOcr, _dispatcher);");
+            }
+        }
+
         #endregion
 
         #region Media Capture stuff - init and setup
         private MediaCapture _mediaCapture;
+        
+        private MediaFrameReader _mediaFrameReader;
         public MediaCapture MediaCapture
         {
             get
@@ -635,7 +655,8 @@ namespace OndertitelLezerUwp.ViewModels
                 var settings = new MediaCaptureInitializationSettings
                 {
                     VideoDeviceId = cameraDevice.Id,
-                    StreamingCaptureMode = StreamingCaptureMode.Video
+                    StreamingCaptureMode = StreamingCaptureMode.Video,
+                    MemoryPreference = MediaCaptureMemoryPreference.Cpu,
                 };
 
                 // Initialize MediaCapture
@@ -750,6 +771,23 @@ namespace OndertitelLezerUwp.ViewModels
 
                         }
                     }
+
+
+                    var frameSourceGroups = await MediaFrameSourceGroup.FindAllAsync();
+                    var selectedGroup = frameSourceGroups.FirstOrDefault(x => x.Id.Equals(cameraDevice.Id));
+
+                    var sourceInfo = selectedGroup?.SourceInfos.FirstOrDefault(info =>
+                        info.SourceKind == MediaFrameSourceKind.Color);
+                    var colorFrameSource = _mediaCapture.FrameSources[sourceInfo.Id];
+                    var preferredFormat = colorFrameSource.SupportedFormats
+                        .OrderByDescending(x => x.VideoFormat.Width)
+                        .FirstOrDefault(x => x.VideoFormat.Width <= 1920 &&
+                                             x.Subtype.Equals(MediaEncodingSubtypes.Nv12, StringComparison.OrdinalIgnoreCase));
+
+                    await colorFrameSource.SetFormatAsync(preferredFormat);
+
+ 
+                    _mediaFrameReader = await _mediaCapture.CreateFrameReaderAsync(colorFrameSource);
 
                     await StartPreviewAsync();
                 }
@@ -991,6 +1029,7 @@ namespace OndertitelLezerUwp.ViewModels
 
         #region TTS and mediaplayer stuff
         private MediaElement _mediaElementTts;
+
         public MediaElement MediaElementTts
         {
             get { return _mediaElementTts; }
