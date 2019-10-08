@@ -24,6 +24,7 @@ using System.Globalization;
 using Windows.Media.SpeechSynthesis;
 using Windows.Media.MediaProperties;
 using Windows.Media;
+using Windows.Media.Capture.Frames;
 
 namespace OndertitelLezerUwp.ViewModels
 {
@@ -31,7 +32,6 @@ namespace OndertitelLezerUwp.ViewModels
     {
         private bool _isOcrStarted = false;
         private OcrDectection _ocrDetectionService;
-        private DispatcherTimer _dispatcherTimer = new DispatcherTimer();
         private readonly CoreDispatcher _dispatcher;
 
         // Receive notifications about rotation of the UI and apply any necessary rotation to the preview stream.     
@@ -78,6 +78,11 @@ namespace OndertitelLezerUwp.ViewModels
             {
                 _ocrDetectionService = new OcrDectection();
                 _ttsSynthesizer = new TtsSynthesizer();
+#if DEBUG
+                Log.Logger = new LoggerConfiguration()
+                    .WriteTo.Debug()
+                    .CreateLogger();
+#endif
             }
             catch (System.Exception exc)
             {
@@ -87,7 +92,7 @@ namespace OndertitelLezerUwp.ViewModels
                 Log.Error(exc.InnerException, "Cannot continue, OCR or Synth base service failure");
                 return;
             }
-            
+
             displayInformation.OrientationChanged += DisplayInformation_OrientationChanged;
 
             await StartCameraAsync();
@@ -98,8 +103,8 @@ namespace OndertitelLezerUwp.ViewModels
         public async Task CleanUp()
         {
             await CleanupCameraAsync();
-            _ocrDetectionService.Reset();
-            _ttsSynthesizer.Reset();
+            _ocrDetectionService?.Reset();
+            _ttsSynthesizer?.Reset();
             _trackSpokenSentences = null;
 
             displayInformation.OrientationChanged -= DisplayInformation_OrientationChanged;
@@ -114,106 +119,7 @@ namespace OndertitelLezerUwp.ViewModels
         {
             await this._dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () => await action());
         }
-        
-        private async void _dispatcherTimer_Tick(object sender, object e)
-        {
-            try
-            {
-                await ProcessFrameOcr(_threshold);
-            }
-            catch (System.Exception oexc)
-            {
-                Log.Error(oexc, "Error from await _ocrDetectionService.PerformOcr(bitmapToOcr, _dispatcher);");
-            }
 
-        }
-
-        /// <summary>
-        /// Every x milliseconds, capture a frame from the webcam and process for OCR. 
-        /// </summary>
-        /// <param name="threshold"></param>
-        /// <returns></returns>
-        private async Task ProcessFrameOcr(double threshold)
-        {
-            //Get information about the preview.
-            var previewProperties = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
-            int videoFrameWidth = (int)previewProperties.Width;
-            int videoFrameHeight = (int)previewProperties.Height;
-            
-            if (!externalCamera && (displayInformation.CurrentOrientation == DisplayOrientations.Portrait || displayInformation.CurrentOrientation == DisplayOrientations.PortraitFlipped))
-            {
-                videoFrameWidth = (int)previewProperties.Height;
-                videoFrameHeight = (int)previewProperties.Width;
-            }
-
-            // Create the video frame to request a SoftwareBitmap preview frame.
-            var videoFrame = new VideoFrame(BitmapPixelFormat.Bgra8, videoFrameWidth, videoFrameHeight);
-
-            // Capture the preview frame.
-            using (var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame))
-            {
-                // Collect the resulting frame.
-                SoftwareBitmap bitmap = currentFrame.SoftwareBitmap;
-                WriteableBitmap processedBitmap;
-                SoftwareBitmap bitmapToOcr;
-                int oneThirdHeight = bitmap.PixelHeight / 3;
-
-                processedBitmap = new WriteableBitmap(bitmap.PixelWidth, bitmap.PixelHeight);
-                bitmap.CopyToBuffer(processedBitmap.PixelBuffer);
-
-                processedBitmap = await Helpers.ImageProcessor.ApplyGaussianBlur(processedBitmap, 4);
-
-                if (IsImageEffectsOn)
-                {
-                    processedBitmap = await Helpers.ImageProcessor.AdjustCurvesEffect(processedBitmap);
-                    processedBitmap = await Helpers.ImageProcessor.ApplyStampThreshold(processedBitmap, threshold);
-
-                    Log.Information($"IMG - threshold @ {threshold}, gaussian at 4 applied before OCR.");
-                }
-
-                //set the preview image source - if doing image preprocessing and effects
-                if (_isOcrStarted)
-                {
-                    PreviewImageSource = processedBitmap;
-                    PreviewImageIsVisible = true;
-                    CaptureElementIsVisible = false;
-                }
-
-                if (IsOneThirdCapture)
-                {
-                    Rect rectOneThird = new Rect(0, 0, bitmap.PixelWidth, bitmap.PixelHeight / 3);
-                    WriteableBitmap cropped = Helpers.ImageProcessor.CropToRectangle(processedBitmap, rectOneThird);
-                    bitmapToOcr = new SoftwareBitmap(BitmapPixelFormat.Bgra8, cropped.PixelWidth, cropped.PixelHeight);
-                    bitmapToOcr.CopyFromBuffer(cropped.PixelBuffer);
-                }
-                else
-                {
-                    bitmapToOcr = new SoftwareBitmap(BitmapPixelFormat.Bgra8, processedBitmap.PixelWidth, processedBitmap.PixelHeight);
-                    bitmapToOcr.CopyFromBuffer(processedBitmap.PixelBuffer);
-                }
-
-                Tuple<string, int> result = null;
-                
-                result = await _ocrDetectionService.PerformOcr(bitmapToOcr, _accuracyThreshold, _isOneThirdCapture, oneThirdHeight);
-                
-                if (result != null && result.Item1 != null && result.Item1 != "")
-                {
-
-                    //add to internal list keep track of spoken sentences - this is useful if an empty result is returned between two similar Ocr results (can happen if contrast is really bad for a few milliseconds)
-                    if (!SentenceHasBeenSpoken(result.Item1))
-                    {
-                        _trackSpokenSentences.Add(result.Item1);
-                        _ttsSynthesizer.AddUtteranceToSynthesize(result.Item1);
-                        await SpeechSynthiserCall();
-                        Log.Debug($"OCR result spoken and assigning to Textblox onscreen (Conf: {result.Item2}) - {result.Item1}");
-                        OcrResultText = result.Item1;
-                    }
-
-                    StatusMessage = "";
-                    StatusBackground = new SolidColorBrush(Windows.UI.Colors.Transparent);
-                }
-            }
-        }
 
         private bool SentenceHasBeenSpoken(string item1)
         {
@@ -368,9 +274,7 @@ namespace OndertitelLezerUwp.ViewModels
                 PreviewImageIsVisible = false;
                 CaptureElementIsVisible = true;
 
-
-                _dispatcherTimer.Stop();
-                _dispatcherTimer.Tick -= _dispatcherTimer_Tick;
+                _mediaFrameReader.FrameArrived -= MediaFrameReaderOnFrameArrived;
                 SymbolStartStop = Symbol.Play;
                 SymbolStartStopColor = new SolidColorBrush(Windows.UI.Colors.Green);
 
@@ -393,24 +297,147 @@ namespace OndertitelLezerUwp.ViewModels
                 _ttsSynthesizer.Reset();
                 _trackSpokenSentences = new List<string>();
 
-                await _mediaCapture.VideoDeviceController.ExposureControl.SetAutoAsync(false);
+                if (_mediaCapture.VideoDeviceController.ExposureControl.Supported)
+                {
+                    await _mediaCapture.VideoDeviceController.ExposureControl.SetAutoAsync(false);
+                }
 
                 SymbolStartStop = Symbol.Pause;
                 SymbolStartStopColor = new SolidColorBrush(Windows.UI.Colors.Red);
                 _isOcrStarted = true;
 
-                _dispatcherTimer.Tick += _dispatcherTimer_Tick;
-                _dispatcherTimer.Interval = new TimeSpan(0, 0, 0, 0, 600);
-                _dispatcherTimer.Start();
+                // Realtime mode doesn't work, frames are coming in to fast. OCR can't handle it.
+                _mediaFrameReader.AcquisitionMode = MediaFrameReaderAcquisitionMode.Buffered;
 
-
+                _mediaFrameReader.FrameArrived += MediaFrameReaderOnFrameArrived;
+                await _mediaFrameReader.StartAsync();
             }
 
         }
+
+        private DateTime _lastArrival;
+        private bool _isProcessing;
+
+        private async void MediaFrameReaderOnFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
+        {
+            try
+            {
+                MediaFrameReference frame = sender.TryAcquireLatestFrame();
+                if (frame?.VideoMediaFrame?.SoftwareBitmap == null)
+                    return;
+
+                // only process every 600ms
+                if (DateTime.Now - _lastArrival < TimeSpan.FromMilliseconds(600))
+                    return;
+
+                // stop if there is already something processing
+                if (_isProcessing)
+                    return;
+
+                _lastArrival = DateTime.Now;
+                _isProcessing = true;
+
+                var currentFrame = frame.VideoMediaFrame;
+                // Collect the resulting frame.
+                SoftwareBitmap bitmap = currentFrame.SoftwareBitmap;
+                WriteableBitmap processedBitmap;
+                SoftwareBitmap bitmapToOcr = null;
+                int oneThirdHeight = bitmap.PixelHeight / 3;
+
+                SoftwareBitmap convertedBitMap = SoftwareBitmap.Convert(bitmap, BitmapPixelFormat.Bgra8);
+
+                await OnUiThread(async () =>
+                {
+                    try
+                    {
+                        processedBitmap = new WriteableBitmap(convertedBitMap.PixelWidth, convertedBitMap.PixelHeight);
+                        convertedBitMap.CopyToBuffer(processedBitmap.PixelBuffer);
+
+                        processedBitmap = await Helpers.ImageProcessor.ApplyGaussianBlur(processedBitmap, 4);
+
+                        if (IsImageEffectsOn)
+                        {
+                            processedBitmap = await Helpers.ImageProcessor.AdjustCurvesEffect(processedBitmap);
+                            processedBitmap = await Helpers.ImageProcessor.ApplyStampThreshold(processedBitmap, _threshold);
+
+                            Log.Information($"IMG - threshold @ {_threshold}, gaussian at 4 applied before OCR.");
+                        }
+
+                        //set the preview image source - if doing image preprocessing and effects
+                        if (_isOcrStarted)
+                        {
+                            PreviewImageSource = processedBitmap;
+                            PreviewImageIsVisible = true;
+                            CaptureElementIsVisible = false;
+                        }
+
+                        if (IsOneThirdCapture)
+                        {
+                            Rect rectOneThird = new Rect(0, 0, convertedBitMap.PixelWidth, convertedBitMap.PixelHeight / 3);
+                            WriteableBitmap cropped = Helpers.ImageProcessor.CropToRectangle(processedBitmap, rectOneThird);
+                            bitmapToOcr = new SoftwareBitmap(BitmapPixelFormat.Bgra8, cropped.PixelWidth, cropped.PixelHeight);
+                            bitmapToOcr.CopyFromBuffer(cropped.PixelBuffer);
+                        }
+                        else
+                        {
+                            bitmapToOcr = new SoftwareBitmap(BitmapPixelFormat.Bgra8, processedBitmap.PixelWidth, processedBitmap.PixelHeight);
+                            bitmapToOcr.CopyFromBuffer(processedBitmap.PixelBuffer);
+                        }
+
+                        if (bitmapToOcr == null)
+                            return;
+
+                        Tuple<string, int> result = null;
+
+                        result = await _ocrDetectionService.PerformOcr(bitmapToOcr, _accuracyThreshold, _isOneThirdCapture, oneThirdHeight);
+
+                        if (result?.Item1 != null && result.Item1 != "")
+                        {
+
+                            //add to internal list keep track of spoken sentences - this is useful if an empty result is returned between two similar Ocr results (can happen if contrast is really bad for a few milliseconds)
+                            if (!SentenceHasBeenSpoken(result.Item1))
+                            {
+                                _trackSpokenSentences.Add(result.Item1);
+                                _ttsSynthesizer.AddUtteranceToSynthesize(result.Item1);
+                                await SpeechSynthiserCall();
+                                Log.Debug($"OCR result spoken and assigning to Textblox onscreen (Conf: {result.Item2}) - {result.Item1}");
+                                OcrResultText = result.Item1;
+                            }
+
+                            StatusMessage = "";
+                            StatusBackground = new SolidColorBrush(Windows.UI.Colors.Transparent);
+                        }
+
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex.GetBaseException().Message);
+                    }
+                    finally
+                    {
+                        _isProcessing = false;
+
+                    }
+                }
+                );
+
+            }
+            catch (Exception oexc)
+            {
+                Log.Error(oexc, "Error from await _ocrDetectionService.PerformOcr(bitmapToOcr, _dispatcher);");
+            }
+            finally
+            {
+                _isProcessing = false;
+            }
+        }
+
         #endregion
 
         #region Media Capture stuff - init and setup
         private MediaCapture _mediaCapture;
+
+        private MediaFrameReader _mediaFrameReader;
         public MediaCapture MediaCapture
         {
             get
@@ -559,7 +586,7 @@ namespace OndertitelLezerUwp.ViewModels
 
         private void CalculatePreviewRotation(out VideoRotation sourceRotation, out int rotationDegrees)
         {
-           
+
             switch (displayInformation.CurrentOrientation)
             {
                 case DisplayOrientations.Portrait:
@@ -609,9 +636,11 @@ namespace OndertitelLezerUwp.ViewModels
                 var allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
 
                 //only wors with backpanel hard coded/ can be refactored to leverage external camera
-                DeviceInformation cameraDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Back);
-               
-                
+                DeviceInformation cameraDevice =
+                    allVideoDevices.FirstOrDefault(x => x.EnclosureLocation?.Panel == Windows.Devices.Enumeration.Panel.Back)
+                    ?? allVideoDevices.FirstOrDefault();
+
+
                 if (cameraDevice == null)
                 {
                     StatusBackground = new SolidColorBrush(Windows.UI.Colors.Red);
@@ -632,7 +661,8 @@ namespace OndertitelLezerUwp.ViewModels
                 var settings = new MediaCaptureInitializationSettings
                 {
                     VideoDeviceId = cameraDevice.Id,
-                    StreamingCaptureMode = StreamingCaptureMode.Video
+                    StreamingCaptureMode = StreamingCaptureMode.Video,
+                    MemoryPreference = MediaCaptureMemoryPreference.Cpu,
                 };
 
                 // Initialize MediaCapture
@@ -748,6 +778,22 @@ namespace OndertitelLezerUwp.ViewModels
                         }
                     }
 
+
+                    var frameSourceGroups = await MediaFrameSourceGroup.FindAllAsync();
+                    var selectedGroup = frameSourceGroups.FirstOrDefault(x => x.Id.Equals(cameraDevice.Id));
+
+                    var sourceInfo = selectedGroup?.SourceInfos.FirstOrDefault(info =>
+                        info.SourceKind == MediaFrameSourceKind.Color);
+                    var colorFrameSource = _mediaCapture.FrameSources[sourceInfo.Id];
+                    var preferredFormat = colorFrameSource.SupportedFormats
+                        .OrderByDescending(x => x.VideoFormat.Width)
+                        .FirstOrDefault(x => x.VideoFormat.Width <= 1920 &&
+                                             x.Subtype.Equals(MediaEncodingSubtypes.Nv12, StringComparison.OrdinalIgnoreCase));
+
+                    await colorFrameSource.SetFormatAsync(preferredFormat);
+
+                    _mediaFrameReader = await _mediaCapture.CreateFrameReaderAsync(colorFrameSource);
+
                     await StartPreviewAsync();
                 }
             }
@@ -757,7 +803,6 @@ namespace OndertitelLezerUwp.ViewModels
         private async Task StartPreviewAsync()
         {
             displayRequest.RequestActive();
-
 
             MediaFlowDirection = mirroringPreview ? Windows.UI.Xaml.FlowDirection.RightToLeft : Windows.UI.Xaml.FlowDirection.LeftToRight;
             CaptureElement.Source = _mediaCapture;
@@ -785,7 +830,7 @@ namespace OndertitelLezerUwp.ViewModels
                 await SetPreviewRotationAsync();
             }
         }
-        
+
 
         private async void MediaCapture_Failed(MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs)
         {
@@ -988,6 +1033,7 @@ namespace OndertitelLezerUwp.ViewModels
 
         #region TTS and mediaplayer stuff
         private MediaElement _mediaElementTts;
+
         public MediaElement MediaElementTts
         {
             get { return _mediaElementTts; }
